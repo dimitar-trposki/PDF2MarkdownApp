@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>PDF → Markdown Editor</title>
+    <title>PDF → Text/Markdown Editor</title>
 
     <style>
         :root {
@@ -16,6 +16,9 @@
             --ok: #43d17a;
             --shadow: 0 10px 30px rgba(0, 0, 0, .35);
             --radius: 14px;
+
+            --selectBg: rgba(12, 16, 28, .98);
+            --selectBorder: rgba(255, 255, 255, .16);
         }
 
         * {
@@ -140,6 +143,7 @@
             min-height: 20px;
             font-size: 13px;
             color: var(--muted);
+            flex-wrap: wrap;
         }
 
         .error {
@@ -149,7 +153,7 @@
 
         .grid {
             display: grid;
-            grid-template-columns:1fr 1fr;
+            grid-template-columns: 1fr 1fr;
             gap: 16px;
         }
 
@@ -183,9 +187,29 @@
             overflow: auto;
         }
 
+        /* Select styling */
+        select.btn {
+            appearance: none;
+            padding-right: 34px;
+            background-color: var(--selectBg);
+            border-color: var(--selectBorder);
+            color: var(--text);
+
+            background-image: linear-gradient(45deg, transparent 50%, rgba(255, 255, 255, .75) 50%),
+            linear-gradient(135deg, rgba(255, 255, 255, .75) 50%, transparent 50%);
+            background-position: calc(100% - 18px) 50%, calc(100% - 12px) 50%;
+            background-size: 6px 6px, 6px 6px;
+            background-repeat: no-repeat;
+        }
+
+        select.btn option {
+            background: var(--selectBg);
+            color: #fff;
+        }
+
         @media (max-width: 980px) {
             .grid {
-                grid-template-columns:1fr;
+                grid-template-columns: 1fr;
             }
 
             textarea, .preview {
@@ -201,8 +225,10 @@
 
 <body>
 <div class="container">
-    <h1>PDF → Markdown Editor</h1>
-    <p class="subtitle">Upload a PDF, get Markdown, edit it, and see a live preview. Download when ready.</p>
+    <h1>PDF → Text/Markdown Editor</h1>
+    <p class="subtitle">
+        Upload a PDF, choose a model, convert to text/markdown, edit it, see a live preview, and download.
+    </p>
 
     <div class="toolbar">
         <div class="toolbarTop">
@@ -211,11 +237,17 @@
             <button id="chooseFileBtn" class="btn" type="button">Choose PDF</button>
 
             <span id="filePill" class="filePill" title="No file selected">
-        <span id="fileDot" class="dot"></span>
-        <span id="fileName">No file selected</span>
-      </span>
+                <span id="fileDot" class="dot"></span>
+                <span id="fileName">No file selected</span>
+            </span>
+
+            <!-- Model dropdown -->
+            <select id="modelSelect" class="btn" title="Choose model" aria-label="Choose model">
+                <option value="">Loading models…</option>
+            </select>
 
             <button id="uploadBtn" class="btn btnPrimary" type="button">Upload & Convert</button>
+
             <button id="clearBtn" class="btn btnDanger" type="button">Clear</button>
 
             <div class="spacer"></div>
@@ -236,8 +268,8 @@
 
     <div class="grid">
         <div class="panel">
-            <h3>Markdown</h3>
-            <textarea id="mdEditor" placeholder="Upload a PDF to generate markdown..."></textarea>
+            <h3>Markdown / Text</h3>
+            <textarea id="mdEditor" placeholder="Upload a PDF to generate output..."></textarea>
         </div>
 
         <div class="panel">
@@ -252,6 +284,8 @@
     const chooseFileBtn = document.getElementById("chooseFileBtn");
     const fileNameEl = document.getElementById("fileName");
     const fileDot = document.getElementById("fileDot");
+
+    const modelSelect = document.getElementById("modelSelect");
 
     const uploadBtn = document.getElementById("uploadBtn");
     const clearBtn = document.getElementById("clearBtn");
@@ -284,6 +318,39 @@
         chooseFileBtn.textContent = "Choose PDF";
     }
 
+    async function post(url, data) {
+        const res = await fetch(url, {
+            method: "POST",
+            headers: {"X-CSRFToken": csrfToken()},
+            body: data
+        });
+        return {ok: res.ok, json: await res.json()};
+    }
+
+    async function loadModels() {
+        try {
+            const res = await fetch("/ocr-models/");
+            const json = await res.json();
+            const models = json.models || [];
+
+            modelSelect.innerHTML = "";
+
+            const placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = models.length ? "Select model…" : "No models available";
+            modelSelect.appendChild(placeholder);
+
+            for (const m of models) {
+                const opt = document.createElement("option");
+                opt.value = m.key;
+                opt.textContent = m.label;
+                modelSelect.appendChild(opt);
+            }
+        } catch (e) {
+            modelSelect.innerHTML = `<option value="">Failed to load models</option>`;
+        }
+    }
+
     chooseFileBtn.addEventListener("click", () => pdfInput.click());
 
     pdfInput.addEventListener("change", () => {
@@ -301,15 +368,6 @@
     });
 
     let renderTimer = null;
-
-    async function post(url, data) {
-        const res = await fetch(url, {
-            method: "POST",
-            headers: {"X-CSRFToken": csrfToken()},
-            body: data
-        });
-        return {ok: res.ok, json: await res.json()};
-    }
 
     async function renderPreview() {
         const fd = new FormData();
@@ -348,11 +406,17 @@
             return;
         }
 
+        if (!modelSelect.value) {
+            setError("Please select a model first.");
+            return;
+        }
+
         uploadBtn.disabled = true;
         setStatus("Converting…");
 
         const fd = new FormData();
         fd.append("pdf", pdfInput.files[0]);
+        fd.append("model_key", modelSelect.value);
 
         const {ok, json} = await post("/convert/", fd);
         uploadBtn.disabled = false;
@@ -368,11 +432,14 @@
         downloadText.value = mdEditor.value;
         downloadBtn.disabled = mdEditor.value.trim().length === 0;
 
-        setStatus("Done.");
+        const label = modelSelect.options[modelSelect.selectedIndex]?.textContent || "model";
+        setStatus(`Done. Output generated using ${label}.`);
         fileDot.className = "dot ok";
     });
 
+    // init
     resetFileUI();
+    loadModels();
 </script>
 </body>
 </html>
