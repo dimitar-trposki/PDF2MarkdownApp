@@ -1,0 +1,5 @@
+# PyTesseract dependencies
+# Inherits from base.txt
+# Note: Tesseract OCR binary must be installed via apt
+
+pytesseract>=0.3.10

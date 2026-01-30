@@ -1,0 +1,40 @@
+# =============================================================================
+# pdf2md-easyocr: Base + EasyOCR
+# =============================================================================
+# Adds EasyOCR support for image-based OCR.
+# Includes PyTorch CPU for inference.
+#
+# Build:
+#   docker build -f docker/Dockerfile.easyocr -t pdf2md-easyocr .
+#
+# Run:
+#   docker run -p 8000:8000 pdf2md-easyocr
+#
+# =============================================================================
+
+FROM pdf2md-base AS base
+
+USER root
+
+# Install additional system dependencies for EasyOCR
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # OpenCV dependencies
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+COPY requirements/easyocr.txt /app/requirements/easyocr.txt
+
+# Install EasyOCR dependencies
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements/easyocr.txt
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+

@@ -1,0 +1,120 @@
+# =============================================================================
+# pdf2md-full: All OCR models included
+# =============================================================================
+# Complete image with all OCR backends:
+# - EasyOCR (neural network based)
+# - PyTesseract (traditional OCR)
+# - Marker-PDF (deep learning PDF converter)
+#
+# Build:
+#   docker build -f docker/Dockerfile.full -t pdf2md-full .
+#
+# Run (MINIMUM 10GB memory required for Marker model):
+#   docker run -p 8000:8000 --memory=10g pdf2md-full
+#
+# Note: This is the largest image (~6GB+) but provides access to all models.
+#
+# GPU Support (faster, but requires nvidia-docker):
+#   docker run --gpus all -p 8000:8000 --memory=10g pdf2md-full
+# =============================================================================
+
+FROM python:3.12-slim
+
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install ALL system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Required for PyMuPDF
+    libmupdf-dev \
+    libfreetype6-dev \
+    libjpeg-dev \
+    libpng-dev \
+    # OpenCV dependencies (for EasyOCR and Marker)
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    # Tesseract OCR and language packs
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-mkd \
+    tesseract-ocr-rus \
+    # For Marker PDF processing
+    ghostscript \
+    poppler-utils \
+    # Build tools
+    build-essential \
+    # General utilities
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+
+RUN useradd --create-home --shell /bin/bash appuser
+
+
+COPY requirements/ /app/requirements/
+
+# Install all Python dependencies
+# Order matters: base first, then add-ons
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements/base.txt \
+    && pip install --no-cache-dir -r requirements/pytesseract.txt \
+    && pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements/easyocr.txt \
+    && pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements/marker.txt
+
+# Environment variables
+ENV TESSERACT_CMD=/usr/bin/tesseract
+ENV TESSERACT_LANG=eng
+ENV HF_HOME=/home/appuser/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface
+
+# Memory optimization settings for Marker/Surya
+ENV SURYA_DETECTOR_BATCH_SIZE=1
+ENV SURYA_RECOGNITION_BATCH_SIZE=1
+ENV SURYA_ORDER_BATCH_SIZE=1
+ENV SURYA_LAYOUT_BATCH_SIZE=1
+ENV SURYA_TABLE_REC_BATCH_SIZE=1
+# Force CPU mode and disable GPU
+ENV CUDA_VISIBLE_DEVICES=""
+ENV MARKER_DISABLE_GPU=1
+# PyTorch memory optimization settings
+ENV PYTORCH_NO_CUDA_MEMORY_CACHING=1
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+# Limit workers and threads
+ENV TOKENIZERS_PARALLELISM=false
+
+# Cache directories
+RUN mkdir -p /home/appuser/.cache/huggingface \
+    && mkdir -p /home/appuser/.cache/datalab \
+    && chown -R appuser:appuser /home/appuser/.cache
+
+
+RUN mkdir -p /usr/local/lib/python3.12/site-packages/static \
+    && chmod 777 /usr/local/lib/python3.12/site-packages/static
+
+
+COPY . /app/
+
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+RUN python manage.py collectstatic --noinput 2>/dev/null || true
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

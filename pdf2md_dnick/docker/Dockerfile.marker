@@ -1,0 +1,76 @@
+# =============================================================================
+# pdf2md-marker: Base + Marker-PDF
+# =============================================================================
+# Adds Marker-PDF for high-quality PDF to Markdown conversion.
+# Uses deep learning models for layout detection and OCR.
+#
+# Build:
+#   docker build -f docker/Dockerfile.marker -t pdf2md-marker .
+#
+# Run (MINIMUM 10GB memory required):
+#   docker run -p 8000:8000 --memory=10g pdf2md-marker
+#
+# GPU Support (faster, but requires nvidia-docker):
+#   docker run --gpus all -p 8000:8000 --memory=10g pdf2md-marker
+# =============================================================================
+
+FROM pdf2md-base AS base
+
+USER root
+
+# Install system dependencies for Marker
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    ghostscript \
+    poppler-utils \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+
+COPY requirements/marker.txt /app/requirements/marker.txt
+
+# Install Marker dependencies
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    -r requirements/marker.txt
+
+
+RUN mkdir -p /home/appuser/.cache/huggingface \
+    && mkdir -p /home/appuser/.cache/datalab \
+    && chown -R appuser:appuser /home/appuser/.cache
+
+RUN mkdir -p /usr/local/lib/python3.12/site-packages/static \
+    && chmod 777 /usr/local/lib/python3.12/site-packages/static
+
+# HuggingFace cache directory
+ENV HF_HOME=/home/appuser/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface
+
+
+# Memory optimization settings for Marker/Surya
+# Use minimum batch sizes to reduce memory consumption
+ENV SURYA_DETECTOR_BATCH_SIZE=1
+ENV SURYA_RECOGNITION_BATCH_SIZE=1
+ENV SURYA_ORDER_BATCH_SIZE=1
+ENV SURYA_LAYOUT_BATCH_SIZE=1
+ENV SURYA_TABLE_REC_BATCH_SIZE=1
+# Force CPU mode and disable GPU
+ENV CUDA_VISIBLE_DEVICES=""
+ENV MARKER_DISABLE_GPU=1
+# PyTorch memory optimization settings
+ENV PYTORCH_NO_CUDA_MEMORY_CACHING=1
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+# Limit workers and threads
+ENV TOKENIZERS_PARALLELISM=false
+
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+
