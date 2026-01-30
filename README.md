@@ -123,7 +123,7 @@ Create:
 docker/Dockerfile.yourmodel
 
 Template:
-```
+``` dockerfile
 FROM pdf2md-base AS base
 
 USER root
@@ -179,26 +179,25 @@ docker/Dockerfile.full
 
 - Add any new system dependencies to the `apt-get install` section
 - Add a new `pip install` line for your requirements file:                                                                                                                 
-       ```                                                                                                                                                         
-       && pip install --no-cache-dir -r requirements/yourmodel.txt                                                                                                           
-       ```     
-
+  ```
+  && pip install --no-cache-dir -r requirements/yourmodel.txt
+  ```     
 ---
 
 # Download and run already existing docker images
 For windows:
- - docker pull dimitartrposki/pdf2md-base
- - docker pull dimitartrposki/pdf2md-easyocr
- - docker pull dimitartrposki/pdf2md-pytesseract
- - docker pull dimitartrposki/pdf2md-marker
- - docker pull dimitartrposki/pdf2md-full   
+ - `docker pull dimitartrposki/pdf2md-base`
+ - `docker pull dimitartrposki/pdf2md-easyocr`
+ - `docker pull dimitartrposki/pdf2md-pytesseract`
+ - `docker pull dimitartrposki/pdf2md-marker`
+ - `docker pull dimitartrposki/pdf2md-full`
 
 For Macintosh:
- - docker pull matejmitev/pdf2md-base
- - docker pull matejmitev/pdf2md-easyocr
- - docker pull matejmitev/pdf2md-pytesseract
- - docker pull matejmitev/pdf2md-marker
- - docker pull matejmitev/pdf2md-full   
+ - `docker pull matejmitev/pdf2md-base`
+ - `docker pull matejmitev/pdf2md-easyocr`
+ - `docker pull matejmitev/pdf2md-pytesseract`
+ - `docker pull matejmitev/pdf2md-marker`
+ - `docker pull matejmitev/pdf2md-full`
 
 ---
 
