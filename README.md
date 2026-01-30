@@ -52,6 +52,7 @@ pdf_converter/ocr_models.py
 
 Template:
 
+```python
 try:
     import myocr  # replace with your library
 
@@ -94,7 +95,7 @@ try:
 
 except ImportError:
     pass
-
+```
 ---
 
 ## STEP 2 — CREATE REQUIREMENTS FILE
@@ -104,13 +105,13 @@ Create:
 requirements/yourmodel.txt
 
 Example:
-
+```
 your-ocr-library
 torch>=2.5
 opencv-python-headless
 pillow
 numpy
-
+```
 Only include Python packages used by your model.
 
 ---
@@ -122,7 +123,7 @@ Create:
 docker/Dockerfile.yourmodel
 
 Template:
-
+```
 FROM pdf2md-base AS base
 
 USER root
@@ -145,29 +146,29 @@ RUN pip install --no-cache-dir \
 
 RUN chown -R appuser:appuser /app
 USER appuser
-
+```
 ---
 
 ## STEP 4 — BUILD AND RUN
 
 Only if base changed:
-
+```
 docker build -f docker/Dockerfile.base -t pdf2md-base:latest .
-
+```
 Build model image:
-
+```
 docker build -f docker/Dockerfile.yourmodel -t pdf2md-yourmodel:latest .
-
+```
 Run:
 
 For smaller models (EasyOCR, PyTesseract):
-
+```
 docker run -p 8000:8000 pdf2md-yourmodel
-
+```
 For bigger models (Marker):
-
+```
 docker run -p 8000:8000 --memory=10g pdf2md-yourmodel
-
+```
 ---
 
 # ADDING MODEL TO FULL IMAGE (Optional)
@@ -176,10 +177,11 @@ If you want your model to be present in the full image in:
 
 docker/Dockerfile.full
 
-- Add any new system dependencies to the apt-get install section  
-- Add a new pip install line for your requirements file:
-
-&& pip install --no-cache-dir -r requirements/yourmodel.txt
+- Add any new system dependencies to the `apt-get install` section
+- Add a new `pip install` line for your requirements file:                                                                                                                 
+       ```                                                                                                                                                         
+       && pip install --no-cache-dir -r requirements/yourmodel.txt                                                                                                           
+       ```     
 
 ---
 
