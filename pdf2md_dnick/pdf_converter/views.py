@@ -44,10 +44,13 @@ def convert_pdf(request):
 
     try:
         model = create_model(model_key)
-        text = model.run_on_pdf(pdf_bytes)  # ✅ ONLY selected model
+        text = model.predict(pdf_bytes)
         text = normalize_markdown_spacing(text)
     except Exception as e:
-        return JsonResponse({"error": f"Conversion failed: {str(e)}"}, status=500)
+        if 'tesseract' in str(e):
+            return JsonResponse({"error": "PyTesseract is not installed.\nType this into the terminal:\nbrew install tesseract-lang"}, status=500)
+        else:
+            return JsonResponse({"error": f"Conversion failed: {str(e)}"}, status=500)
 
     preview_html = md.markdown(text, extensions=["fenced_code", "tables", "toc", "nl2br"])
 

@@ -1,164 +1,172 @@
+"""
+OCR Models for PDF to Markdown conversion.
+
+All models inherit from BasePDFModel and implement the predict() method.
+To add a new model:
+    1. Create a class inheriting from BasePDFModel
+    2. Implement predict(self, pdf_bytes: bytes) -> str
+    3. Use @register_model("key", "Display Label") decorator
+    4. Wrap in try/except if the model has optional dependencies
+
+Models are conditionally registered based on available dependencies,
+allowing Docker images to include only specific OCR backends.
+"""
 from __future__ import annotations
-import os, tempfile
+
+import os
+import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
 
-from .ocr_registry import register_model, register_factory
+from .ocr_registry import register_model
 from .pdf_pages import pdf_bytes_to_page_images
 
 
-# ===== Base =====
 class BasePDFModel(ABC):
-    name: str
+    """
+    Abstract base class for all PDF-to-text models.
+
+    Every model must implement the predict() method which takes
+    raw PDF bytes and returns extracted text/markdown.
+    """
 
     @abstractmethod
-    def run_on_pdf(self, pdf_bytes: bytes) -> str:
-        """Return extracted text/markdown using ONLY this model."""
+    def predict(self, pdf_bytes: bytes) -> str:
+        """
+        Convert PDF bytes to text/markdown.
+
+        Args:
+            pdf_bytes: Raw bytes of the PDF file.
+
+        Returns:
+            Extracted text or markdown string.
+        """
         raise NotImplementedError
 
 
-class ImageOCRPDFModel(BasePDFModel):
-    """For models that only OCR images: PDF -> page images -> predict_image() per page."""
-    dpi: int = 220
-
-    @abstractmethod
-    def predict_image(self, image_path: str) -> str:
-        raise NotImplementedError
-
-    def run_on_pdf(self, pdf_bytes: bytes) -> str:
-        with tempfile.TemporaryDirectory() as td:
-            pages = pdf_bytes_to_page_images(pdf_bytes, Path(td), dpi=self.dpi)
-            out = []
-            for idx, p in enumerate(pages, start=1):
-                t = (self.predict_image(str(p)) or "").strip()
-                if t:
-                    out.append(f"## Page {idx}\n{t}")
-            return "\n\n".join(out).strip()
-
-
-# ===== EasyOCR =====
-@register_model("easyocr_en", "EasyOCR (en)")
-class EasyOCRModel(ImageOCRPDFModel):
-    def __init__(self, lang: str = "en", gpu: bool = False):
-        self.name = f"easyocr[{lang}]"
-        import easyocr
-        self.reader = easyocr.Reader([lang], gpu=gpu)
-
-    def predict_image(self, image_path: str) -> str:
-        results = self.reader.readtext(image_path, detail=0)
-        return "\n".join(results).strip()
-
-
-register_factory("easyocr_mk", "EasyOCR (mk)", lambda: EasyOCRModel(lang="mk", gpu=False))
-
-
-# ===== PyTesseract =====
-@register_model("pytesseract_eng", "PyTesseract (eng)")
-class PyTesseractModel(ImageOCRPDFModel):
-    def __init__(self, lang: Optional[str] = None):
-        self.name = "pytesseract"
-        import pytesseract
-        from PIL import Image
-        self._tess = pytesseract
-        self._Image = Image
-
-        tesseract_cmd = os.getenv("TESSERACT_CMD")
-        if tesseract_cmd:
-            self._tess.pytesseract.tesseract_cmd = tesseract_cmd
-
-        self.lang = lang or os.getenv("TESSERACT_LANG", "eng")
-
-    def predict_image(self, image_path: str) -> str:
-        img = self._Image.open(image_path)
-        return (self._tess.image_to_string(img, lang=self.lang) or "").strip()
-
-
-# ===== OpenAI Vision (optional) =====
+# =============================================================================
+# EasyOCR Model (optional - requires easyocr package)
+# =============================================================================
 try:
-    from openai import OpenAI
-    import base64
+    import easyocr as _easyocr_module
 
+    @register_model("easyocr", "EasyOCR")
+    class EasyOCRModel(BasePDFModel):
+        """EasyOCR-based PDF extraction. Converts PDF pages to images internally."""
 
-    @register_model("openai_vision", "OpenAI Vision OCR")
-    class OpenAIVisionOCRModel(ImageOCRPDFModel):
-        def __init__(self, model: Optional[str] = None):
-            self.name = "openai-vision"
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                raise RuntimeError("OPENAI_API_KEY is not set")
-            self.client = OpenAI(api_key=api_key)
-            self.model_name = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        def __init__(self, lang: str = "ru", gpu: bool = False, dpi: int = 220):
+            import easyocr
+            self.lang = lang
+            self.dpi = dpi
+            self.reader = easyocr.Reader([lang], gpu=gpu)
 
-        def _data_url(self, path: str) -> str:
-            b = Path(path).read_bytes()
-            return "data:image/png;base64," + base64.b64encode(b).decode("utf-8")
+        def predict(self, pdf_bytes: bytes) -> str:
+            with tempfile.TemporaryDirectory() as td:
+                pages = pdf_bytes_to_page_images(pdf_bytes, Path(td), dpi=self.dpi)
+                out = []
+                for idx, page_path in enumerate(pages, start=1):
+                    results = self.reader.readtext(str(page_path), detail=0)
+                    text = "\n".join(results).strip()
+                    if text:
+                        out.append(f"## Page {idx}\n{text}")
+                return "\n\n".join(out).strip()
 
-        def predict_image(self, image_path: str) -> str:
-            resp = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": (
-                            "Extract ALL text from this image exactly as it appears. "
-                            "The text may be in Macedonian (Cyrillic). "
-                            "Do NOT translate or summarize; just transcribe."
-                        )},
-                        {"type": "image_url", "image_url": {"url": self._data_url(image_path)}},
-                    ],
-                }],
-                temperature=0.0,
-            )
-            return (resp.choices[0].message.content or "").strip()
-
-except Exception:
+except ImportError:
+    # EasyOCR not installed - skip registration
     pass
 
-# ===== Gemini Vision (optional) =====
+
+# =============================================================================
+# PyTesseract Model (optional - requires pytesseract package + tesseract binary)
+# =============================================================================
 try:
-    from google import genai
-    from google.genai import types
+    import pytesseract as _pytesseract_module
 
+    @register_model("pytesseract", "PyTesseract")
+    class PyTesseractModel(BasePDFModel):
+        """PyTesseract-based PDF extraction. Converts PDF pages to images internally."""
 
-    @register_model("gemini_vision", "Gemini Vision OCR")
-    class GeminiVisionOCRModel(ImageOCRPDFModel):
-        def __init__(self, model: Optional[str] = None):
-            self.name = "gemini-vision"
-            api_key = os.getenv("GEMINI_API_KEY")
-            if not api_key:
-                raise RuntimeError("GEMINI_API_KEY is not set")
-            self.model_name = model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-            self.client = genai.Client(api_key=api_key)
+        def __init__(self, lang: Optional[str] = None, dpi: int = 220):
+            import pytesseract
+            from PIL import Image
 
-        def predict_image(self, image_path: str) -> str:
-            b = Path(image_path).read_bytes()
-            prompt = (
-                "Extract ALL text from this image exactly as it appears. "
-                "The text may be in Macedonian (Cyrillic). "
-                "Do NOT translate or summarize; just transcribe."
-            )
-            resp = self.client.models.generate_content(
-                model=self.model_name,
-                contents=[types.Part.from_bytes(data=b, mime_type="image/png"), prompt],
-            )
-            return (resp.text or "").strip()
+            self._tess = pytesseract
+            self._Image = Image
+            self.dpi = dpi
 
-except Exception:
+            tesseract_cmd = os.getenv("TESSERACT_CMD")
+            if tesseract_cmd:
+                self._tess.pytesseract.tesseract_cmd = tesseract_cmd
+
+            self.lang = "mkd"
+
+        def predict(self, pdf_bytes: bytes) -> str:
+            with tempfile.TemporaryDirectory() as td:
+                pages = pdf_bytes_to_page_images(pdf_bytes, Path(td), dpi=self.dpi)
+                out = []
+                for idx, page_path in enumerate(pages, start=1):
+                    img = self._Image.open(page_path)
+                    text = (self._tess.image_to_string(img, lang=self.lang) or "").strip()
+                    if text:
+                        out.append(f"## Page {idx}\n{text}")
+                return "\n\n".join(out).strip()
+
+except ImportError:
+    # PyTesseract not installed - skip registration
     pass
 
-# ===== Marker is separate & does PDF->Markdown directly (optional) =====
+
+# =============================================================================
+# Marker Model (optional - requires marker-pdf package)
+# =============================================================================
 try:
-    from .pdf_models_marker import marker_pdf_bytes_to_markdown
+    from marker.converters.pdf import PdfConverter
+    from marker.models import create_model_dict
+    from marker.output import text_from_rendered
 
+    # Initialize converter once at module load for better performance
+    _marker_converter = None
 
-    @register_model("marker", "Marker (PDF → Markdown)")
+    def _get_marker_converter():
+        """Lazy initialization of Marker converter."""
+        global _marker_converter
+        if _marker_converter is None:
+            _marker_converter = PdfConverter(artifact_dict=create_model_dict())
+        return _marker_converter
+
+    @register_model("marker", "Marker")
     class MarkerModel(BasePDFModel):
+        """Marker library for direct PDF-to-Markdown conversion (no intermediate images)."""
+
         def __init__(self):
-            self.name = "marker"
+            # Lazy load the converter on first use
+            self._converter = None
 
-        def run_on_pdf(self, pdf_bytes: bytes) -> str:
-            return marker_pdf_bytes_to_markdown(pdf_bytes)
+        def predict(self, pdf_bytes: bytes) -> str:
+            if self._converter is None:
+                self._converter = _get_marker_converter()
 
+            tmp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                    tmp_path = f.name
+                    f.write(pdf_bytes)
+
+                rendered = self._converter(tmp_path)
+                text, _, _ = text_from_rendered(rendered)
+                return (text or "").strip()
+
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+
+except ImportError:
+    # Marker not installed - skip registration
+    pass
 except Exception:
+    # Marker has other issues (missing torch, etc.) - skip registration
     pass
