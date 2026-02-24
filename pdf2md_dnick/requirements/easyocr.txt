@@ -1,8 +1,0 @@
-# EasyOCR dependencies
-# Inherits from base.txt
-
-easyocr>=1.7.0
-
-# EasyOCR requires torch (CPU version for smaller image)
-torch>=2.0.0
-torchvision>=0.15.0
