@@ -1,0 +1,10 @@
+# Base requirements for Django
+Django>=5.0,<6.0
+
+PyMuPDF>=1.24.0
+
+Pillow>=10.0.0
+
+Markdown>=3.5.0
+
+httpx>=0.27.0

@@ -1,0 +1,41 @@
+# =============================================================================
+# pdf2md-pytesseract: Base + Tesseract OCR
+# =============================================================================
+# Adds Tesseract OCR support for image-based OCR.
+#
+# Build:
+#   docker build -f docker/Dockerfile.pytesseract -t pdf2md-pytesseract .
+#
+# Run:
+#   docker run -p 8000:8000 pdf2md-pytesseract
+#
+# Environment variables:
+#   TESSERACT_LANG - Language code
+#   TESSERACT_CMD  - Path to tesseract binary
+# =============================================================================
+
+FROM pdf2md-base AS base
+
+USER root
+
+# Install Tesseract OCR and language packs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-mkd \
+    tesseract-ocr-rus \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+COPY requirements/pytesseract.txt /app/requirements/pytesseract.txt
+
+RUN pip install --no-cache-dir -r requirements/pytesseract.txt
+
+# Tesseract environment variables
+ENV TESSERACT_CMD=/usr/bin/tesseract
+ENV TESSERACT_LANG=mkd
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+

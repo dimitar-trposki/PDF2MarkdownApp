@@ -1,0 +1,3 @@
+# PyTesseract dependencies
+
+pytesseract>=0.3.10
